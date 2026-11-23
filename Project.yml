@@ -2,16 +2,19 @@ name: DeviceScope
 options:
   bundleIdPrefix: com.hmtpro
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 targets:
   DeviceScope:
     type: application
     platform: iOS
     sources:
       - Sources
+      - Shared
     dependencies:
       - sdk: CoreMotion.framework
       - sdk: Network.framework
+      - target: DeviceScopeWidget
+        embed: true
     info:
       path: Sources/Info.plist
       properties:
@@ -20,12 +23,34 @@ targets:
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSMotionUsageDescription: 用于实时显示加速度计、陀螺仪等传感器数据
+        NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hmtpro.devicescope
         PRODUCT_NAME: DeviceScope
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "2"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+  DeviceScopeWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widget
+      - Shared
+    info:
+      path: Widget/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.hmtpro.devicescope.widget
+        PRODUCT_NAME: DeviceScopeWidget
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "2"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_ALLOWED: NO
