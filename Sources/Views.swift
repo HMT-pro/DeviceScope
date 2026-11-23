@@ -120,6 +120,22 @@ struct MonitorView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("灵动岛实时活动").font(.headline)
+                            Text(m.islandOn ? "运行中：岛上显示 CPU / 内存 / 电量" : "把 CPU、电量钉在灵动岛和锁屏上")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(m.islandOn ? "停止" : "开启") { m.toggleIsland() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(m.islandOn ? .red : .orange)
+                    }
+                    .padding(.vertical, 4)
+                } footer: {
+                    Text("实时活动由系统托管，应用退到后台后数据更新会变慢；锁屏也会同步显示。")
+                }
                 Section("CPU 使用率（最近 60 秒）") {
                     Chart(Array(m.cpuHistory.enumerated()), id: \.offset) { item in
                         LineMark(x: .value("秒", item.offset), y: .value("%", item.element))

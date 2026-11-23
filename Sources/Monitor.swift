@@ -48,7 +48,10 @@ final class Monitor: ObservableObject {
     @Published var wifiBytes: (in: UInt64, out: UInt64) = (0, 0)
     @Published var cellBytes: (in: UInt64, out: UInt64) = (0, 0)
 
+    @Published var islandOn: Bool = false
+
     private var timer: Timer?
+    private var tickCount: Int = 0
     private var prevTicks: [[Int32]]?
     private let pathMonitor = NWPathMonitor()
     private let pathQueue = DispatchQueue(label: "devicescope.path")
@@ -109,6 +112,32 @@ final class Monitor: ObservableObject {
         lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
         thermal = ProcessInfo.processInfo.thermalState
         uptime = ProcessInfo.processInfo.systemUptime
+
+        tickCount += 1
+        if islandOn && tickCount % 5 == 0 {
+            LiveActivityController.shared.update(islandState())
+        }
+    }
+
+    // MARK: - Dynamic Island Live Activity
+
+    func islandState() -> DeviceActivityAttributes.ContentState {
+        DeviceActivityAttributes.ContentState(
+            cpuPercent: cpuTotal * 100,
+            memPercent: memUsedFraction * 100,
+            batteryPercent: batteryLevel >= 0 ? Int(batteryLevel * 100) : -1,
+            charging: batteryState == .charging || batteryState == .full
+        )
+    }
+
+    func toggleIsland() {
+        if islandOn {
+            LiveActivityController.shared.stop()
+            islandOn = false
+        } else {
+            LiveActivityController.shared.start(deviceName: DeviceInfo.marketingName, state: islandState())
+            islandOn = LiveActivityController.shared.isRunning
+        }
     }
 
     private func refreshSlow() {
