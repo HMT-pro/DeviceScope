@@ -119,8 +119,8 @@ final class Monitor: ObservableObject {
 
         // Real-time network throughput from interface counter deltas
         let t = Self.trafficCounters()
-        let totalIn = t.wifi.in + t.cell.in
-        let totalOut = t.wifi.out + t.cell.out
+        let totalIn = t.wifi.0 + t.cell.0
+        let totalOut = t.wifi.1 + t.cell.1
         let now = Date().timeIntervalSince1970
         if let p = prevTraffic {
             let dt = now - p.time
