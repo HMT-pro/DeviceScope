@@ -230,6 +230,13 @@ struct BatteryView: View {
 
 // MARK: - Network
 
+func formatRate(_ bps: Double) -> String {
+    if bps < 1024 { return String(format: "%.0f B/s", bps) }
+    if bps < 1024 * 1024 { return String(format: "%.1f KB/s", bps / 1024) }
+    if bps < 1024 * 1024 * 1024 { return String(format: "%.2f MB/s", bps / 1024 / 1024) }
+    return String(format: "%.2f GB/s", bps / 1024 / 1024 / 1024)
+}
+
 struct NetworkView: View {
     @EnvironmentObject var m: Monitor
     var body: some View {
@@ -238,6 +245,20 @@ struct NetworkView: View {
                 Section("连接") {
                     InfoRow(label: "当前网络", value: m.pathDescription)
                     InfoRow(label: "隧道接口（VPN/Loon 等）", value: m.tunnelDetected ? "已检测到" : "未检测到")
+                }
+                Section("实时网速") {
+                    HStack {
+                        Image(systemName: "arrow.down.circle.fill").foregroundStyle(.green)
+                        Text("下载").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatRate(m.netDownBps)).font(.headline.monospacedDigit())
+                    }
+                    HStack {
+                        Image(systemName: "arrow.up.circle.fill").foregroundStyle(.blue)
+                        Text("上传").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(formatRate(m.netUpBps)).font(.headline.monospacedDigit())
+                    }
                 }
                 Section("流量（自开机累计）") {
                     InfoRow(label: "Wi-Fi 接收", value: DeviceInfo.formatBytes(m.wifiBytes.in))

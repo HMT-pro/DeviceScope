@@ -47,6 +47,10 @@ final class Monitor: ObservableObject {
     @Published var pathDescription: String = "—"
     @Published var wifiBytes: (in: UInt64, out: UInt64) = (0, 0)
     @Published var cellBytes: (in: UInt64, out: UInt64) = (0, 0)
+    @Published var netDownBps: Double = 0   // bytes per second, all interfaces
+    @Published var netUpBps: Double = 0
+
+    private var prevTraffic: (in: UInt64, out: UInt64, time: TimeInterval)?
 
     @Published var islandOn: Bool = false
 
@@ -112,6 +116,20 @@ final class Monitor: ObservableObject {
         lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
         thermal = ProcessInfo.processInfo.thermalState
         uptime = ProcessInfo.processInfo.systemUptime
+
+        // Real-time network throughput from interface counter deltas
+        let t = Self.trafficCounters()
+        let totalIn = t.wifi.in + t.cell.in
+        let totalOut = t.wifi.out + t.cell.out
+        let now = Date().timeIntervalSince1970
+        if let p = prevTraffic {
+            let dt = now - p.time
+            if dt > 0 {
+                netDownBps = totalIn >= p.in ? Double(totalIn - p.in) / dt : 0
+                netUpBps = totalOut >= p.out ? Double(totalOut - p.out) / dt : 0
+            }
+        }
+        prevTraffic = (totalIn, totalOut, now)
 
         tickCount += 1
         if islandOn && tickCount % 5 == 0 {
