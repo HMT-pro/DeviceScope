@@ -1,7 +1,6 @@
 import Foundation
 import UIKit
 import Network
-import IOKit
 
 struct BatteryDetails {
     var cycleCount: Int?
@@ -213,16 +212,43 @@ final class Monitor: ObservableObject {
         return (0, 0)
     }
 
-    // MARK: - Battery via IOKit (AppleSmartBattery)
+    // MARK: - Battery via IOKit (AppleSmartBattery, dynamically loaded:
+    // the iOS SDK ships no Swift module for IOKit, so resolve the C symbols at runtime)
 
     private static func readBatteryDetails() -> BatteryDetails {
         var d = BatteryDetails()
-        let svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard let handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY) else { return d }
+        defer { dlclose(handle) }
+
+        typealias MatchingFn = @convention(c) (UnsafePointer<CChar>) -> UnsafeMutableRawPointer?
+        typealias GetServiceFn = @convention(c) (UInt32, UnsafeRawPointer) -> UInt32
+        typealias CreatePropsFn = @convention(c) (UInt32, UnsafeMutablePointer<UnsafeMutableRawPointer?>, UnsafeRawPointer?, UInt32) -> Int32
+        typealias ReleaseFn = @convention(c) (UInt32) -> Int32
+
+        guard let matchingSym = dlsym(handle, "IOServiceMatching"),
+              let getServiceSym = dlsym(handle, "IOServiceGetMatchingService"),
+              let createPropsSym = dlsym(handle, "IORegistryEntryCreateCFProperties"),
+              let releaseSym = dlsym(handle, "IOObjectRelease") else { return d }
+        let matching = unsafeBitCast(matchingSym, to: MatchingFn.self)
+        let getService = unsafeBitCast(getServiceSym, to: GetServiceFn.self)
+        let createProps = unsafeBitCast(createPropsSym, to: CreatePropsFn.self)
+        let release = unsafeBitCast(releaseSym, to: ReleaseFn.self)
+
+        var mainPort: UInt32 = 0
+        if let sym = dlsym(handle, "kIOMainPortDefault") {
+            mainPort = sym.load(as: UInt32.self)
+        }
+        guard let dictPtr = "AppleSmartBattery".withCString({ matching($0) }) else { return d }
+        let matchingDict = Unmanaged<CFMutableDictionary>.fromOpaque(dictPtr).takeRetainedValue()
+        // IOServiceGetMatchingService consumes one reference of the matching dictionary.
+        let svc = getService(mainPort, Unmanaged.passRetained(matchingDict).toOpaque())
         if svc == 0 { return d }
-        defer { IOObjectRelease(svc) }
-        var propsRef: Unmanaged<CFMutableDictionary>?
-        guard IORegistryEntryCreateCFProperties(svc, &propsRef, kCFAllocatorDefault, 0) == KERN_SUCCESS,
-              let dict = propsRef?.takeRetainedValue() as? [String: Any] else { return d }
+        defer { _ = release(svc) }
+
+        var propsPtr: UnsafeMutableRawPointer? = nil
+        let allocPtr: UnsafeRawPointer? = kCFAllocatorDefault.map { UnsafeRawPointer(Unmanaged.passUnretained($0).toOpaque()) }
+        guard createProps(svc, &propsPtr, allocPtr, 0) == 0, let rawProps = propsPtr,
+              let dict = Unmanaged<CFMutableDictionary>.fromOpaque(rawProps).takeRetainedValue() as? [String: Any] else { return d }
         d.cycleCount = dict["CycleCount"] as? Int
         d.designCapacity = dict["DesignCapacity"] as? Int
         d.maxCapacity = (dict["AppleRawMaxCapacity"] as? Int) ?? (dict["MaxCapacity"] as? Int)
