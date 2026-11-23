@@ -10,7 +10,6 @@ targets:
     sources:
       - Sources
     dependencies:
-      - sdk: IOKit.framework
       - sdk: CoreMotion.framework
       - sdk: Network.framework
     info:
