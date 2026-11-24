@@ -7,12 +7,30 @@ struct BatteryDetails {
     var designCapacity: Int?
     var maxCapacity: Int?
     var currentCapacity: Int?
+    var nominalCapacity: Int?
     var voltageMV: Int?
     var temperatureC: Double?
     var isChargingHW: Bool?
+    var amperageMA: Int?          // signed: positive = charging, negative = discharging
+    var externalConnected: Bool?
+    var fullyCharged: Bool?
+    var avgTimeToEmptyMin: Int?
+    var avgTimeToFullMin: Int?
+    var adapterWatts: Int?
+    var adapterDesc: String?
+    var chargingVoltageMV: Int?
+    var chargingCurrentMA: Int?
+    var cellVoltagesMV: [Int]?
+    var designCycleCount: Int?
+    var manufactureDate: String?
+    var serial: String?
     var healthPercent: Double? {
         guard let m = maxCapacity, let d = designCapacity, d > 0 else { return nil }
         return Double(m) / Double(d) * 100.0
+    }
+    var powerW: Double? {
+        guard let v = voltageMV, let a = amperageMA else { return nil }
+        return Double(v) / 1000.0 * Double(a) / 1000.0
     }
 }
 
@@ -49,10 +67,28 @@ final class Monitor: ObservableObject {
     @Published var cellBytes: (in: UInt64, out: UInt64) = (0, 0)
     @Published var netDownBps: Double = 0   // bytes per second, all interfaces
     @Published var netUpBps: Double = 0
+    @Published var netSourceLabel: String = "—"
 
     private var prevTraffic: (in: UInt64, out: UInt64, time: TimeInterval)?
 
     @Published var islandOn: Bool = false
+    @Published var islandError: String?
+    @Published var islandShowCPU: Bool = true {
+        didSet { UserDefaults.standard.set(islandShowCPU, forKey: "island.show.cpu"); pushIslandIfOn() }
+    }
+    @Published var islandShowMem: Bool = true {
+        didSet { UserDefaults.standard.set(islandShowMem, forKey: "island.show.mem"); pushIslandIfOn() }
+    }
+    @Published var islandShowBatt: Bool = true {
+        didSet { UserDefaults.standard.set(islandShowBatt, forKey: "island.show.batt"); pushIslandIfOn() }
+    }
+    @Published var islandShowNet: Bool = true {
+        didSet { UserDefaults.standard.set(islandShowNet, forKey: "island.show.net"); pushIslandIfOn() }
+    }
+
+    private func pushIslandIfOn() {
+        if islandOn { LiveActivityController.shared.update(islandState()) }
+    }
 
     private var timer: Timer?
     private var tickCount: Int = 0
@@ -61,7 +97,13 @@ final class Monitor: ObservableObject {
     private let pathQueue = DispatchQueue(label: "devicescope.path")
 
     init() {
+        islandShowCPU = UserDefaults.standard.object(forKey: "island.show.cpu") as? Bool ?? true
+        islandShowMem = UserDefaults.standard.object(forKey: "island.show.mem") as? Bool ?? true
+        islandShowBatt = UserDefaults.standard.object(forKey: "island.show.batt") as? Bool ?? true
+        islandShowNet = UserDefaults.standard.object(forKey: "island.show.net") as? Bool ?? true
         UIDevice.current.isBatteryMonitoringEnabled = true
+        LiveActivityController.shared.syncFromSystem()
+        islandOn = LiveActivityController.shared.isRunning
         startPathMonitor()
         refreshSlow()
         sample()
@@ -117,10 +159,16 @@ final class Monitor: ObservableObject {
         thermal = ProcessInfo.processInfo.thermalState
         uptime = ProcessInfo.processInfo.systemUptime
 
-        // Real-time network throughput from interface counter deltas
+        // Real-time network throughput from interface counter deltas.
+        // Physical interfaces (en0 / pdp_ip) are preferred; if they report
+        // nothing at all, fall back to the tunnel interfaces (utun, e.g. Loon).
         let t = Self.trafficCounters()
-        let totalIn = t.wifi.0 + t.cell.0
-        let totalOut = t.wifi.1 + t.cell.1
+        let physIn = t.wifi.0 + t.cell.0
+        let physOut = t.wifi.1 + t.cell.1
+        let useTunnel = physIn == 0 && physOut == 0 && (t.tun.0 > 0 || t.tun.1 > 0)
+        let totalIn = useTunnel ? t.tun.0 : physIn
+        let totalOut = useTunnel ? t.tun.1 : physOut
+        netSourceLabel = useTunnel ? "隧道接口" : "Wi-Fi / 蜂窝"
         let now = Date().timeIntervalSince1970
         if let p = prevTraffic {
             let dt = now - p.time
@@ -132,7 +180,10 @@ final class Monitor: ObservableObject {
         prevTraffic = (totalIn, totalOut, now)
 
         tickCount += 1
-        if islandOn && tickCount % 5 == 0 {
+        if tickCount % 3 == 0 {
+            batteryDetails = Self.readBatteryDetails()
+        }
+        if islandOn && tickCount % 3 == 0 {
             LiveActivityController.shared.update(islandState())
         }
     }
@@ -144,7 +195,13 @@ final class Monitor: ObservableObject {
             cpuPercent: cpuTotal * 100,
             memPercent: memUsedFraction * 100,
             batteryPercent: batteryLevel >= 0 ? Int(batteryLevel * 100) : -1,
-            charging: batteryState == .charging || batteryState == .full
+            charging: batteryState == .charging || batteryState == .full,
+            netDownBps: netDownBps,
+            netUpBps: netUpBps,
+            showCPU: islandShowCPU,
+            showMem: islandShowMem,
+            showBatt: islandShowBatt,
+            showNet: islandShowNet
         )
     }
 
@@ -152,9 +209,15 @@ final class Monitor: ObservableObject {
         if islandOn {
             LiveActivityController.shared.stop()
             islandOn = false
+            islandError = nil
         } else {
+            guard islandShowCPU || islandShowMem || islandShowBatt || islandShowNet else {
+                islandError = "还没选上岛内容：到「监控」页的「灵动岛显示内容」里至少打开一项。"
+                return
+            }
             LiveActivityController.shared.start(deviceName: DeviceInfo.marketingName, state: islandState())
             islandOn = LiveActivityController.shared.isRunning
+            islandError = LiveActivityController.shared.lastError
         }
     }
 
@@ -300,10 +363,41 @@ final class Monitor: ObservableObject {
         d.designCapacity = dict["DesignCapacity"] as? Int
         d.maxCapacity = (dict["AppleRawMaxCapacity"] as? Int) ?? (dict["MaxCapacity"] as? Int)
         d.currentCapacity = (dict["AppleRawCurrentCapacity"] as? Int) ?? (dict["CurrentCapacity"] as? Int)
+        d.nominalCapacity = dict["NominalChargeCapacity"] as? Int
         d.voltageMV = dict["Voltage"] as? Int
         if let t = dict["Temperature"] as? Int { d.temperatureC = Double(t) / 100.0 }
         d.isChargingHW = dict["IsCharging"] as? Bool
+        d.amperageMA = (dict["InstantAmperage"] as? Int) ?? (dict["Amperage"] as? Int)
+        d.externalConnected = (dict["ExternalConnected"] as? Bool) ?? (dict["AppleRawExternalConnected"] as? Bool)
+        d.fullyCharged = dict["FullyCharged"] as? Bool
+        d.avgTimeToEmptyMin = Self.validMinutes(dict["AvgTimeToEmpty"] as? Int)
+        d.avgTimeToFullMin = Self.validMinutes(dict["AvgTimeToFull"] as? Int)
+        if let ad = dict["AdapterDetails"] as? [String: Any] {
+            d.adapterWatts = ad["Watts"] as? Int
+            d.adapterDesc = (ad["Description"] as? String) ?? (ad["Name"] as? String)
+        }
+        if let cd = dict["ChargerData"] as? [String: Any] {
+            d.chargingVoltageMV = cd["ChargingVoltage"] as? Int
+            d.chargingCurrentMA = cd["ChargingCurrent"] as? Int
+        }
+        d.cellVoltagesMV = dict["CellVoltage"] as? [Int]
+        d.designCycleCount = (dict["DesignCycleCount"] as? Int) ?? (dict["DesignCycleCount9C"] as? Int)
+        d.serial = dict["Serial"] as? String
+        if let md = dict["ManufactureDate"] as? Int {
+            // SMBus packed date: bits 0-4 day, 5-8 month, 9-15 years since 1980
+            let day = md & 0x1F
+            let month = (md >> 5) & 0xF
+            let year = 1980 + ((md >> 9) & 0x7F)
+            if (1...12).contains(month) && (1...31).contains(day) {
+                d.manufactureDate = "\(year)年\(month)月\(day)日"
+            }
+        }
         return d
+    }
+
+    private static func validMinutes(_ v: Int?) -> Int? {
+        guard let v, v > 0, v < 65535 else { return nil }
+        return v
     }
 
     // MARK: - Network interfaces & traffic
@@ -332,11 +426,12 @@ final class Monitor: ObservableObject {
         return result
     }
 
-    private static func trafficCounters() -> (wifi: (UInt64, UInt64), cell: (UInt64, UInt64)) {
+    private static func trafficCounters() -> (wifi: (UInt64, UInt64), cell: (UInt64, UInt64), tun: (UInt64, UInt64)) {
         var wifi: (UInt64, UInt64) = (0, 0)
         var cell: (UInt64, UInt64) = (0, 0)
+        var tun: (UInt64, UInt64) = (0, 0)
         var addrList: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&addrList) == 0, let first = addrList else { return (wifi, cell) }
+        guard getifaddrs(&addrList) == 0, let first = addrList else { return (wifi, cell, tun) }
         defer { freeifaddrs(addrList) }
         var ptr: UnsafeMutablePointer<ifaddrs>? = first
         while let cur = ptr {
@@ -349,11 +444,14 @@ final class Monitor: ObservableObject {
                 } else if name.hasPrefix("pdp_ip") {
                     cell.0 += UInt64(data.ifi_ibytes)
                     cell.1 += UInt64(data.ifi_obytes)
+                } else if name.hasPrefix("utun") {
+                    tun.0 += UInt64(data.ifi_ibytes)
+                    tun.1 += UInt64(data.ifi_obytes)
                 }
             }
             ptr = cur.pointee.ifa_next
         }
-        return (wifi, cell)
+        return (wifi, cell, tun)
     }
 
     private static func tunnelActive() -> Bool {

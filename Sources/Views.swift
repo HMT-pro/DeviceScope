@@ -19,6 +19,22 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Dynamic Island toolbar button (persistent, top-right on every tab)
+
+struct IslandToolbarButton: View {
+    @EnvironmentObject var m: Monitor
+    var body: some View {
+        Button { m.toggleIsland() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: m.islandOn ? "capsule.fill" : "capsule")
+                Text(m.islandOn ? "岛上" : "上岛")
+                    .font(.caption.bold())
+            }
+            .foregroundStyle(m.islandOn ? Color.orange : Color.secondary)
+        }
+    }
+}
+
 // MARK: - Shared rows
 
 struct InfoRow: View {
@@ -99,6 +115,7 @@ struct OverviewView: View {
                 }
             }
             .navigationTitle("DeviceScope")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { IslandToolbarButton() } }
         }
     }
 
@@ -121,20 +138,18 @@ struct MonitorView: View {
         NavigationStack {
             List {
                 Section {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("灵动岛实时活动").font(.headline)
-                            Text(m.islandOn ? "运行中：岛上显示 CPU / 内存 / 电量" : "把 CPU、电量钉在灵动岛和锁屏上")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(m.islandOn ? "停止" : "开启") { m.toggleIsland() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(m.islandOn ? .red : .orange)
+                    InfoRow(label: "状态", value: m.islandOn ? "运行中" : "未开启")
+                    if let e = m.islandError {
+                        Text(e).font(.footnote).foregroundStyle(.red)
                     }
-                    .padding(.vertical, 4)
+                    Toggle("CPU 使用率", isOn: $m.islandShowCPU)
+                    Toggle("内存占用", isOn: $m.islandShowMem)
+                    Toggle("电量", isOn: $m.islandShowBatt)
+                    Toggle("实时网速", isOn: $m.islandShowNet)
+                } header: {
+                    Text("灵动岛显示内容")
                 } footer: {
-                    Text("实时活动由系统托管，应用退到后台后数据更新会变慢；锁屏也会同步显示。")
+                    Text("开关在每个页面右上角常驻（上岛 / 岛上）。开启后切到别的 App 或锁屏，岛上和锁屏卡片显示所选数据；实时活动由系统托管，后台更新会变慢。")
                 }
                 Section("CPU 使用率（最近 60 秒）") {
                     Chart(Array(m.cpuHistory.enumerated()), id: \.offset) { item in
@@ -166,6 +181,7 @@ struct MonitorView: View {
                 }
             }
             .navigationTitle("实时监控")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { IslandToolbarButton() } }
         }
     }
 }
@@ -181,6 +197,51 @@ struct BatteryView: View {
                     InfoRow(label: "电量", value: m.batteryLevel >= 0 ? "\(Int(m.batteryLevel * 100))%" : "—")
                     InfoRow(label: "充电状态", value: stateText(m.batteryState))
                     InfoRow(label: "低电量模式", value: m.lowPower ? "开启" : "关闭")
+                    if let ext = m.batteryDetails.externalConnected {
+                        InfoRow(label: "接通电源", value: ext ? "是" : "否")
+                    }
+                    if m.batteryDetails.fullyCharged == true {
+                        InfoRow(label: "已充满", value: "是")
+                    }
+                    if m.batteryState == .charging, let f = m.batteryDetails.avgTimeToFullMin {
+                        InfoRow(label: "预计充满还需", value: "\(f) 分钟")
+                    }
+                    if m.batteryState == .unplugged, let e = m.batteryDetails.avgTimeToEmptyMin {
+                        InfoRow(label: "预计可用", value: "约 \(e) 分钟")
+                    }
+                }
+                Section("实时电气") {
+                    if let v = m.batteryDetails.voltageMV {
+                        InfoRow(label: "电压", value: String(format: "%.3f V", Double(v) / 1000.0))
+                    }
+                    if let a = m.batteryDetails.amperageMA {
+                        InfoRow(label: "电流", value: "\(abs(a)) mA（\(a >= 0 ? "充电" : "放电")）")
+                    }
+                    if let p = m.batteryDetails.powerW {
+                        InfoRow(label: "功率", value: String(format: "%.1f W（%@）", abs(p), p >= 0 ? "充入" : "耗电"))
+                    }
+                    if let t = m.batteryDetails.temperatureC {
+                        InfoRow(label: "电池温度", value: String(format: "%.1f °C", t))
+                    }
+                    if m.batteryDetails.voltageMV == nil && m.batteryDetails.amperageMA == nil {
+                        Text("此设备未返回电气数据").foregroundStyle(.secondary)
+                    }
+                }
+                if m.batteryDetails.adapterWatts != nil || m.batteryDetails.chargingVoltageMV != nil {
+                    Section("充电器") {
+                        if let w = m.batteryDetails.adapterWatts {
+                            InfoRow(label: "适配器功率", value: "\(w) W")
+                        }
+                        if let d = m.batteryDetails.adapterDesc {
+                            InfoRow(label: "适配器", value: d)
+                        }
+                        if let cv = m.batteryDetails.chargingVoltageMV {
+                            InfoRow(label: "充电电压", value: String(format: "%.2f V", Double(cv) / 1000.0))
+                        }
+                        if let ca = m.batteryDetails.chargingCurrentMA {
+                            InfoRow(label: "充电电流", value: "\(ca) mA")
+                        }
+                    }
                 }
                 Section("硬件信息（IOKit）") {
                     if let c = m.batteryDetails.cycleCount {
@@ -198,11 +259,22 @@ struct BatteryView: View {
                     if let cur = m.batteryDetails.currentCapacity {
                         InfoRow(label: "当前电量容量", value: "\(cur) mAh")
                     }
-                    if let v = m.batteryDetails.voltageMV {
-                        InfoRow(label: "电压", value: String(format: "%.2f V", Double(v) / 1000.0))
+                    if let n = m.batteryDetails.nominalCapacity {
+                        InfoRow(label: "标称容量", value: "\(n) mAh")
                     }
-                    if let t = m.batteryDetails.temperatureC {
-                        InfoRow(label: "电池温度", value: String(format: "%.1f °C", t))
+                    if let dc = m.batteryDetails.designCycleCount {
+                        InfoRow(label: "设计循环上限", value: "\(dc) 次")
+                    }
+                    if let cells = m.batteryDetails.cellVoltagesMV, !cells.isEmpty {
+                        ForEach(Array(cells.enumerated()), id: \.offset) { cell in
+                            InfoRow(label: "电芯 \(cell.offset + 1) 电压", value: String(format: "%.3f V", Double(cell.element) / 1000.0))
+                        }
+                    }
+                    if let md = m.batteryDetails.manufactureDate {
+                        InfoRow(label: "电池生产日期", value: md)
+                    }
+                    if let s = m.batteryDetails.serial {
+                        InfoRow(label: "电池序列号", value: s)
                     }
                     if m.batteryDetails.cycleCount == nil {
                         Text("此设备未返回电池硬件数据")
@@ -215,6 +287,7 @@ struct BatteryView: View {
                 }
             }
             .navigationTitle("电池")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { IslandToolbarButton() } }
         }
     }
 
@@ -259,6 +332,7 @@ struct NetworkView: View {
                         Spacer()
                         Text(formatRate(m.netUpBps)).font(.headline.monospacedDigit())
                     }
+                    InfoRow(label: "计数来源", value: m.netSourceLabel)
                 }
                 Section("流量（自开机累计）") {
                     InfoRow(label: "Wi-Fi 接收", value: DeviceInfo.formatBytes(m.wifiBytes.in))
@@ -282,6 +356,7 @@ struct NetworkView: View {
                 }
             }
             .navigationTitle("网络")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { IslandToolbarButton() } }
         }
     }
 }
@@ -321,6 +396,7 @@ struct SensorsView: View {
                 }
             }
             .navigationTitle("传感器")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { IslandToolbarButton() } }
             .onAppear { motion.start() }
             .onDisappear { motion.stop() }
         }
