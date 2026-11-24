@@ -20,6 +20,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: DeviceScope
+        CFBundleShortVersionString: "1.3"
+        CFBundleVersion: "4"
         CFBundleIcons:
           CFBundlePrimaryIcon:
             CFBundleIconFiles:
@@ -33,8 +35,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hmtpro.devicescope
         PRODUCT_NAME: DeviceScope
-        MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "1.3"
+        CURRENT_PROJECT_VERSION: "4"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_ALLOWED: NO
@@ -54,8 +56,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hmtpro.devicescope.widget
         PRODUCT_NAME: DeviceScopeWidget
-        MARKETING_VERSION: "1.2"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "1.3"
+        CURRENT_PROJECT_VERSION: "4"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGNING_ALLOWED: NO
