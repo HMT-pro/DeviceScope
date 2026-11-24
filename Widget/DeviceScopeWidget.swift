@@ -69,7 +69,7 @@ struct DeviceScopeLiveActivity: Widget {
             .padding()
         } dynamicIsland: { context in
             let ms = metrics(for: context.state)
-            DynamicIsland {
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     if let first = ms.first {
                         VStack(alignment: .leading, spacing: 2) {
